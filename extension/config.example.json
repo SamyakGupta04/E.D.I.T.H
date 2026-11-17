@@ -1,0 +1,101 @@
+{
+  "_readme": "Copy this file to config.json in the same folder and replace the example values, or fill the Settings page. Empty values are unknown: EDITH leaves those fields to Claude or to you. See README.md for every field.",
+  "personal": {
+    "first_name": "Jordan",
+    "last_name": "Lee",
+    "preferred_name": "",
+    "pronouns": "They/Them",
+    "date_of_birth": ""
+  },
+  "contact": {
+    "email": "jordan.lee@example.com",
+    "phone": "4165550123",
+    "phone_country_code": "+1",
+    "linkedin": "https://www.linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "website": ""
+  },
+  "location": {
+    "address_line1": "",
+    "city": "Toronto",
+    "state": "Ontario",
+    "postal_code": "",
+    "country": "Canada",
+    "nationality": "Canadian",
+    "authorized_countries": ["Canada"],
+    "home_locations": ["Toronto", "Vancouver", "Montreal", "Ottawa", "Calgary", "Waterloo"],
+    "preferred_locations": ["Toronto", "Remote"],
+    "open_to_locations": "Toronto, or any city in Canada",
+    "willing_to_relocate": "Yes"
+  },
+  "work": {
+    "current_title": "Software Engineer",
+    "current_company": "Example Corp",
+    "current_start": "2023-06",
+    "total_experience_years": "3",
+    "notice_period_days": "30",
+    "current_salary": "95,000 CAD",
+    "expected_salary": "115,000 CAD",
+    "work_mode_preference": "Hybrid",
+    "skills": ["Python", "TypeScript", "SQL", "React", "Node.js", "PostgreSQL", "Docker", "AWS"],
+    "skill_keywords": ["backend", "back-end", "api", "apis", "cloud", "web"],
+    "summary": "Software engineer with three years of experience in web backends and data pipelines.",
+    "experience_focus": "At Example Corp I rebuilt the billing service in Python and cut its error rate by 80%.",
+    "previous_applications": []
+  },
+  "education": {
+    "university": "University of Toronto",
+    "university_short": "UofT",
+    "university_aliases": ["University of Toronto - St. George"],
+    "degree": "B.Sc.",
+    "degree_aliases": ["Bachelor's Degree", "Bachelor of Science", "Bachelors", "Bachelor"],
+    "major": "Computer Science",
+    "major_aliases": ["Computer Engineering", "Software Engineering", "Engineering"],
+    "education_level": "Bachelor's Degree",
+    "education_start": "2018-09",
+    "graduation_date": "2022-05",
+    "gpa": "3.6",
+    "currently_student": "No"
+  },
+  "questions": {
+    "over_18": "Yes",
+    "flexible_availability": "Yes",
+    "comfortable_onsite": "Yes",
+    "previously_worked_here": "No",
+    "relatives_working_here": "No",
+    "non_compete": "No",
+    "criminal_record": "No",
+    "government_official": "No",
+    "background_check_consent": "Yes",
+    "english_fluent": "Yes",
+    "sms_consent": "Yes",
+    "were_referred": "No",
+    "agree_to_terms": "Yes",
+    "how_did_you_hear": "LinkedIn"
+  },
+  "demographics": {
+    "gender": "",
+    "ethnicity": [],
+    "hispanic_or_latino": "",
+    "veteran_status": "",
+    "disability": "",
+    "transgender": "",
+    "sexual_orientation": ""
+  },
+  "writing": {
+    "cover_letter_template": "I am applying for the {role} role at {company}. {summary} {experience_focus} I would like to bring this experience to {company}.",
+    "claude_instructions": ""
+  },
+  "custom_answers": [
+    { "question": "percentage of time coding", "answer": "70%" },
+    { "question": "/favou?rite programming language/", "answer": "Python" }
+  ],
+  "hunt": {
+    "roles": ["Software Engineer", "Backend Engineer"],
+    "locations": ["Canada", "Remote"],
+    "exclude_titles": ["Senior", "Sr.", "Sr", "Staff", "Principal", "Lead", "Manager", "Director", "Head of", "Intern"],
+    "seed_ashby": [],
+    "seed_greenhouse": [],
+    "seed_lever": []
+  }
+}

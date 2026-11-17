@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "EDITH",
+  "short_name": "EDITH",
+  "version": "1.0.0",
+  "description": "Fills job applications from your own profile and resume. Optional Claude helper for unknown questions, and a job hunt for Ashby, Greenhouse and Lever.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://*.google.com/*",
+    "https://jobs.ashbyhq.com/*",
+    "https://api.ashbyhq.com/*",
+    "https://job-boards.greenhouse.io/*",
+    "https://boards.greenhouse.io/*",
+    "https://boards-api.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://api.lever.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shared.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "EDITH",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "commands": {
+    "fill": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Fill the application form on this tab"
+    }
+  }
+}

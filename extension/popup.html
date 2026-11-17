@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>EDITH</title>
+<style>
+  body { width: 340px; margin: 0; padding: 12px; font: 13px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .08em; }
+  .brand { display: flex; gap: 8px; align-items: center; }
+  .brand img { width: 22px; height: 22px; }
+  .top-right { display: flex; gap: 10px; align-items: center; }
+  #setup { display: none; margin: 0 0 8px; padding: 6px 8px; border-radius: 6px; background: #fef3c7; color: #92400e; font-size: 12px; }
+  #setup a { font-size: 12px; }
+  h2 { font-size: 13px; margin: 12px 0 4px; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+  .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  label { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .grid label { flex-direction: column; align-items: stretch; gap: 2px; font-size: 11px; color: #555; }
+  input[type=text], input[type=number], select, textarea { width: 100%; box-sizing: border-box; font: 12px system-ui, sans-serif; padding: 3px; }
+  textarea { height: 64px; font-family: monospace; }
+  .row { display: flex; gap: 6px; }
+  button { flex: 1; margin-top: 8px; padding: 6px; font: inherit; cursor: pointer; }
+  #start { background: #2563eb; color: #fff; border: 0; border-radius: 4px; }
+  #start:disabled { background: #93c5fd; }
+  #status, #hstatus { margin-top: 8px; color: #555; }
+  #log { margin-top: 6px; max-height: 150px; overflow-y: auto; font-size: 11px; }
+  #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-submitted { color: #16a34a; } .s-needs_review, .s-filled, .s-submit_failed { color: #d97706; }
+  .s-error, .s-timeout { color: #dc2626; } .s-closed, .s-no_form, .s-stopped, .s-tab_closed, .s-skipped_location, .s-rate_limited { color: #6b7280; }
+  .bad { color: #dc2626 !important; }
+  .stats-head { display: flex; justify-content: space-between; margin: 10px 0 4px; font-size: 11px; font-weight: 600; color: #374151; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .tile { background: #f3f4f6; border-radius: 6px; padding: 4px 2px; text-align: center; }
+  .tile b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .tile span { font-size: 10px; color: #6b7280; }
+  .tile.ok b { color: #16a34a; } .tile.warn b { color: #d97706; } .tile.err b { color: #dc2626; } .tile.info b { color: #2563eb; }
+  #current { font-size: 11px; color: #2563eb; margin-top: 4px; }
+  #current div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  a { color: #2563eb; cursor: pointer; font-size: 11px; }
+  /* switch */
+  .sw { position: relative; width: 40px; height: 22px; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw span { position: absolute; inset: 0; background: #9ca3af; border-radius: 22px; transition: .2s; cursor: pointer; }
+  .sw span:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .sw input:checked + span { background: #16a34a; }
+  .sw input:checked + span:before { transform: translateX(18px); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand"><img src="icons/icon48.png" alt=""><h1>EDITH</h1></div>
+    <div class="top-right"><a id="settings">Settings</a>
+    <label class="sw" title="Switch the extension on or off"><input type="checkbox" id="enabled"><span></span></label></div>
+  </div>
+  <div id="setup"></div>
+  <label><input type="checkbox" id="autoFill"> Fill automatically on job portals</label>
+  <label><input type="checkbox" id="autoAdvance"> Click "Next" when a page is complete</label>
+  <label><input type="checkbox" id="autoSubmit"> Click "Submit" when complete</label>
+  <label><input type="checkbox" id="useClaude"> Ask Claude for unknown questions (needs helper)</label>
+  <div class="row"><button id="fill">Fill this tab (Alt+Shift+F)</button></div>
+  <textarea id="links" placeholder="Paste job links, one per line"></textarea>
+  <div class="row"><button id="open">Open all links in background tabs</button></div>
+
+  <h2>Job hunt (search → company job lists → apply)</h2>
+  <div class="row" style="gap:10px"><label><input type="checkbox" id="siteAshby"> Ashby</label>
+    <label><input type="checkbox" id="siteGreenhouse"> Greenhouse</label>
+    <label><input type="checkbox" id="siteLever"> Lever</label></div>
+  <textarea id="roles" placeholder="One role per line"></textarea>
+  <label style="flex-direction:column;align-items:stretch;gap:2px;font-size:11px;color:#555">Locations (comma separated, empty = any)
+    <input type="text" id="locations"></label>
+  <label style="flex-direction:column;align-items:stretch;gap:2px;font-size:11px;color:#555">Skip titles with (comma separated)
+    <input type="text" id="exclude"></label>
+  <div class="grid">
+    <label>Posted<select id="freshness"><option value="d">past day</option><option value="w">past week</option><option value="m">past month</option><option value="">any time</option></select></label>
+    <label>Pages / role<input type="number" id="pages" min="1" max="10"></label>
+    <label>Max jobs<input type="number" id="maxJobs" min="1" max="300"></label>
+    <label>Max / company<input type="number" id="perCompany" min="1" max="20"></label>
+    <label>Parallel tabs<input type="number" id="parallel" min="1" max="4"></label>
+  </div>
+  <label><input type="checkbox" id="huntSubmit"> Submit each application automatically</label>
+  <label><input type="checkbox" id="ownWindow"> Open job tabs in a separate window</label>
+  <label><input type="checkbox" id="keepReview"> Keep tabs that need review open (stops after 10)</label>
+  <div class="row"><button id="start">Start hunt</button><button id="stop">Stop</button></div>
+  <div id="hstatus"></div>
+  <div class="stats-head"><span>This run <span id="elapsed"></span></span></div>
+  <div class="stats" id="runStats"></div>
+  <div id="current"></div>
+  <div class="stats-head"><span>All time</span><a id="csv">Download CSV</a></div>
+  <div class="stats" id="allStats"></div>
+  <div class="stats-head"><span>Recent (click to open)</span><a id="huntDefaults" title="Roles, locations and skip words from Settings">Use Settings defaults</a></div>
+  <div id="log"></div>
+  <details id="dbgBox"><summary style="cursor:pointer;font-size:11px;margin-top:8px">Debug log <a id="copyDbg">copy</a></summary>
+    <pre id="dbg" style="max-height:160px;overflow:auto;font-size:10px;white-space:pre-wrap;background:#f3f4f6;padding:4px;margin:4px 0"></pre></details>
+  <a id="reset">Clear history (jobs already seen will open again)</a>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
