@@ -86,10 +86,31 @@ async function claudeProfile() {
   return { profile: p, instructions };
 }
 
-// extension/resume.pdf. The site gets it as "First_Last_Resume.pdf".
-async function loadResume() {
+// Three resumes, chosen by the job title (shared.js: jobTrack):
+//   resume.pdf      default, software roles
+//   resume_ai.pdf   AI and ML roles (optional)
+//   resume_apm.pdf  product management roles (optional)
+const TRACK_RESUME = { pm: "resume_apm.pdf", ai: "resume_ai.pdf", sde: "resume.pdf" };
+const resumeByTab = new Map(); // tabId -> { file, track }, for the Claude helper
+chrome.tabs.onRemoved.addListener((id) => resumeByTab.delete(id));
+
+async function trackFor(tabId, pageTitle) {
+  const t = hunt.tabs.get(tabId);
+  const saved = t ? null : await getJob(tabId);
+  const title = (t && t.job.title) || (saved && saved.title) || pageTitle || "";
+  const track = EdithShared.jobTrack(title);
+  const file = (await readBundled(TRACK_RESUME[track])) ? TRACK_RESUME[track] : "resume.pdf";
+  const old = resumeByTab.get(tabId);
+  resumeByTab.set(tabId, { file, track });
+  if (t && !(old && old.file === file)) dbg(`  ${t.job.company}: ${track} job, resume ${file} ("${title.slice(0, 50)}")`);
+  return { file, track };
+}
+const resumeFileFor = async (tabId, pageTitle) => (await trackFor(tabId, pageTitle)).file;
+
+// The site gets the file as "First_Last_Resume.pdf".
+async function loadResume(tabId, pageTitle) {
   const p = await loadProfile();
-  const r = await readBundled("resume.pdf");
+  const r = await readBundled(await resumeFileFor(tabId, pageTitle));
   if (!r) return { error: "extension/resume.pdf not found. Put your resume there and reload the extension." };
   const buf = new Uint8Array(await r.arrayBuffer());
   let bin = "";
@@ -102,8 +123,10 @@ async function loadResume() {
 async function setupStatus() {
   const { config, profile, hunt } = await getConfig();
   const resume = !!(await readBundled("resume.pdf"));
+  const resumeAi = !!(await readBundled("resume_ai.pdf"));
+  const resumePm = !!(await readBundled("resume_apm.pdf"));
   const configFile = !!(await readBundled("config.json"));
-  return { config, hunt, missing: EdithShared.missingRequired(profile), resume, configFile, configError,
+  return { config, hunt, missing: EdithShared.missingRequired(profile), resume, resumeAi, resumePm, configFile, configError,
     name: profile.full_name || "" };
 }
 
@@ -172,6 +195,8 @@ const MAX_ATTEMPTS = 3;          // tries for one job that met the rate limit
 const ASHBY_JOB = /^https?:\/\/jobs\.ashbyhq\.com\/([^\/?#]+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
 const SITE_ACCESS = { origins: ["https://www.google.com/*", "https://jobs.ashbyhq.com/*", "https://job-boards.greenhouse.io/*", "https://jobs.lever.co/*"] };
+// Extra access for a site that is switched on in the hunt.
+const SITE_ORIGINS = { keka: ["https://*.keka.com/*"] };
 const NO_ACCESS_MSG = "Chrome blocks this extension on Google and the job sites. Open chrome://extensions > EDITH > Details > Site access, and select 'On all sites'. Then start again.";
 
 // ---------- job sites ----------
@@ -227,6 +252,37 @@ const PROVIDERS = {
     key: (org, id) => `lever:${org}/${id}`.toLowerCase(),
     seedKey: "seed_lever",
   },
+  // Keka: each company has its own address, <company>.keka.com/careers. The
+  // form ends with a text CAPTCHA, so EDITH fills it and you submit it.
+  keka: {
+    label: "Keka",
+    sites: ["keka.com/careers"],
+    job: (href) => { const m = href.match(/^https?:\/\/([a-z0-9-]+)\.keka\.com\/careers\/(?:jobdetails|applyjob)\/(\d+)/i); return m ? { org: m[1].toLowerCase(), id: m[2] } : null; },
+    org: (href) => { const m = href.match(/^https?:\/\/([a-z0-9-]+)\.keka\.com\/careers/i); return m && !/^(www|app|help|developers)$/i.test(m[1]) ? m[1].toLowerCase() : null; },
+    // Two requests: the careers page holds the company id, the list needs it.
+    fetchJobs: async (org) => {
+      const base = `https://${encodeURIComponent(org)}.keka.com/careers`;
+      const page = await withTimeout(fetch(base + "/"), 12000, "Keka careers page");
+      if (!page.ok) return null;
+      const id = ((await page.text()).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i) || [])[0];
+      if (!id) return null;
+      const r = await withTimeout(fetch(`${base}/api/embedjobs/default/active/${id}`), 12000, "Keka job list");
+      if (!r.ok) return null;
+      const d = await r.json();
+      return (Array.isArray(d) ? d : []).map((j) => {
+        const locs = j.jobLocations || [];
+        const years = String(j.experience || "").match(/\d+(\.\d+)?/); // "3 - 5 Years" -> 3
+        return { id: String(j.id), title: j.title, listed: true,
+          loc: locs.map((l) => [l.name, l.city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ")).filter(Boolean).join("; "),
+          country: [...new Set(locs.map((l) => l.countryName).filter(Boolean))].join("; "),
+          minYears: years ? Number(years[0]) : null };
+      });
+    },
+    applyUrl: (org, id) => `https://${encodeURIComponent(org)}.keka.com/careers/applyjob/${id}`,
+    key: (org, id) => `keka:${org}/${id}`.toLowerCase(),
+    seedKey: "seed_keka",
+    manualSubmit: true,
+  },
 };
 const providerOf = (href) => Object.keys(PROVIDERS).find((p) => PROVIDERS[p].org(href) || PROVIDERS[p].job(href)) || null;
 
@@ -238,6 +294,7 @@ function boardJobs(prov, org) {
   if (!boardCache.has(k)) {
     boardCache.set(k, (async () => {
       try {
+        if (PROVIDERS[prov].fetchJobs) return await PROVIDERS[prov].fetchJobs(org);
         const r = await withTimeout(fetch(PROVIDERS[prov].listUrl(org)), 12000, "job list");
         if (!r.ok) return null;
         return PROVIDERS[prov].jobs(await r.json());
@@ -260,6 +317,7 @@ async function boardJob(prov, org, id) {
 // "AI Engineer" matches "Applied AI Engineer" and "Software Engineer, AI".
 const canon = (s) => " " + String(s).toLowerCase().replace(/machine learning/g, "ml").replace(/artificial intelligence/g, "ai")
   .replace(/software development engineer|\bsde\b|\bswe\b/g, "software engineer").replace(/developer/g, "engineer")
+  .replace(/\bapm\b/g, "associate product manager").replace(/\bpm\b/g, "product manager")
   .replace(/[^a-z0-9+#]+/g, " ") + " ";
 function matchesRole(title, roles) {
   const t = canon(title);
@@ -280,7 +338,7 @@ chrome.webRequest.onCompleted.addListener((d) => {
   const wait = Math.min(300000, 45000 * 2 ** (hunt.rateHits - 1)); // 45 s, 90 s, 180 s, 300 s
   hunt.pauseUntil = Date.now() + wait;
   dbg(`rate limit: pause ${wait / 1000} s`);
-}, { urls: ["https://jobs.ashbyhq.com/*", "https://job-boards.greenhouse.io/*", "https://boards.greenhouse.io/*", "https://jobs.lever.co/*"] });
+}, { urls: ["https://jobs.ashbyhq.com/*", "https://job-boards.greenhouse.io/*", "https://boards.greenhouse.io/*", "https://jobs.lever.co/*", "https://*.keka.com/*"] });
 
 const boardLocation = (bj, allowed) => EdithShared.judgeLocation(bj.loc, allowed, bj.country, hunt.places);
 
@@ -387,7 +445,7 @@ function readSerp() {
       const u = new URL(href);
       if (/google\./.test(u.hostname) && u.pathname === "/url") href = u.searchParams.get("q") || u.searchParams.get("url") || href;
     } catch (e) {}
-    if (!/jobs\.ashbyhq\.com\/|greenhouse\.io\/|jobs\.lever\.co\//i.test(href)) continue;
+    if (!/jobs\.ashbyhq\.com\/|greenhouse\.io\/|jobs\.lever\.co\/|\.keka\.com\/careers/i.test(href)) continue;
     const h3 = a.querySelector("h3");
     links.push({ href, title: ((h3 && h3.innerText) || a.innerText || "").split("\n")[0].trim().slice(0, 200) });
   }
@@ -406,6 +464,19 @@ async function serp(tabId) {
     10000, "read Google page");
   const r = res && res[0];
   return (r && r.result) || { captcha: false, links: [] };
+}
+
+// Keka lists the experience that a job needs ("8 - 11 Years"). A job that
+// needs more than your years plus one is not for you.
+const tooSenior = (bj, maxYears) => bj && bj.minYears != null && maxYears != null && bj.minYears > maxYears;
+
+// A skip word does not skip a title when the word is part of a role that you
+// search for and the title matches that role. "Manager" is a skip word, and
+// the role "Product Manager" still finds "Associate Product Manager".
+function isExcluded(title, exclude, roles) {
+  const t = String(title).toLowerCase();
+  const mine = roles.filter((r) => matchesRole(title, [r])).map((r) => canon(r));
+  return exclude.some((re) => re.test(t) && !mine.some((r) => re.test(r.trim())));
 }
 
 const isFull = (cfg) => hunt.stop || hunt.started + hunt.queue.length >= cfg.maxJobs;
@@ -427,9 +498,10 @@ async function scanBoard(prov, org, ctx) {
     inPlace = true;
     if (isFull(ctx.cfg)) break;
     if (!bj.listed || !matchesRole(bj.title, ctx.cfg.roles)) continue;
+    if (tooSenior(bj, ctx.maxYears)) { ctx.senior(P.key(org, bj.id)); continue; }
     const key = P.key(org, bj.id);
     if (hunt.queued.has(key) || ctx.seen[key]) continue;
-    if (ctx.exclude.some((re) => re.test(bj.title.toLowerCase()))) {
+    if (isExcluded(bj.title, ctx.exclude, ctx.cfg.roles)) {
       hunt.queued.add(key);
       hunt.found++;
       hunt.counts.excluded = (hunt.counts.excluded || 0) + 1;
@@ -475,7 +547,10 @@ async function searchPhase(cfg, seen) {
     const k = o.includes(":") ? o : "ashby:" + o;
     perOrg.set(k, (perOrg.get(k) || 0) + 1);
   }
-  const ctx = { cfg, seen, exclude, orgCount: (k) => perOrg.get(k) || 0, orgAdd: (k) => perOrg.set(k, (perOrg.get(k) || 0) + 1) };
+  const years = Number((await loadProfile()).total_experience_years);
+  const ctx = { cfg, seen, exclude, orgCount: (k) => perOrg.get(k) || 0, orgAdd: (k) => perOrg.set(k, (perOrg.get(k) || 0) + 1),
+    maxYears: Number.isFinite(years) ? years + 1 : null,
+    senior: (key) => { if (!hunt.queued.has(key)) { hunt.queued.add(key); hunt.found++; hunt.counts.excluded = (hunt.counts.excluded || 0) + 1; } } };
 
   // Step 1: the job lists of the companies already known.
   const { knownOrgs = {}, ashbyOrgs = {} } = await chrome.storage.local.get(["knownOrgs", "ashbyOrgs"]);
@@ -573,7 +648,11 @@ async function searchPhase(cfg, seen) {
         // "Max jobs".
         const bj = await boardJob(prov, j.org, j.id);
         const title = (bj && bj.title) || l.title;
-        if (exclude.some((re) => re.test(title.toLowerCase()))) {
+        if (isExcluded(title, exclude, cfg.roles)) {
+          hunt.counts.excluded = (hunt.counts.excluded || 0) + 1;
+          continue;
+        }
+        if (tooSenior(bj, ctx.maxYears)) {
           hunt.counts.excluded = (hunt.counts.excluded || 0) + 1;
           continue;
         }
@@ -713,6 +792,14 @@ async function ensureScript(tabId, done) {
 }
 
 async function runJob(job, cfg, slot) {
+  // A site with a CAPTCHA that you type (Keka): each job leaves a tab open for
+  // you. When the open tabs reach the limit, its jobs wait for a later hunt.
+  if (PROVIDERS[job.prov] && PROVIDERS[job.prov].manualSubmit && keptTabs.size >= MAX_KEPT_TABS) {
+    hunt.started--;
+    hunt.counts.waiting = (hunt.counts.waiting || 0) + 1;
+    if (hunt.counts.waiting === 1) dbg(`${MAX_KEPT_TABS} tabs wait for you. More ${PROVIDERS[job.prov].label} jobs come in a later hunt.`);
+    return;
+  }
   // Mark the job as seen before the tab opens. If Chrome or the extension
   // stops in the middle, the next hunt does not apply to this job again.
   await markSeen(job, "started");
@@ -865,7 +952,8 @@ async function startHunt(cfg) {
   if (!(await readBundled("resume.pdf"))) return { error: "extension/resume.pdf not found. Put your resume there and reload the extension." };
   // Chrome can withhold site access ("Site access: On click"). Then the form
   // script never runs in the job tabs. Check before any tab opens.
-  if (!(await chrome.permissions.contains(SITE_ACCESS))) return { error: NO_ACCESS_MSG, needAccess: true };
+  const origins = [...SITE_ACCESS.origins, ...(cfg.sites || []).flatMap((p) => SITE_ORIGINS[p] || [])];
+  if (!(await chrome.permissions.contains({ origins }))) return { error: NO_ACCESS_MSG, needAccess: true };
   // Claude is optional. With the helper down, unknown questions stay empty.
   hunt.claude = false;
   if ((await chrome.storage.local.get({ useClaude: true })).useClaude) {
@@ -923,7 +1011,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   (async () => {
     switch (msg.type) {
       case "profile": return loadProfile();
-      case "resume": return loadResume();
+      case "resume": return loadResume(tabId, msg.title);
       case "setup": return setupStatus();
       case "importConfig": return importConfigFile(true);
       case "fillActive": return fillActive();
@@ -932,7 +1020,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         if (!useClaude) return { answers: {} };
         try {
           const { profile, instructions } = await claudeProfile();
-          return await helper("/answer", { questions: msg.questions, job: msg.job, profile, instructions });
+          const { file: resume_file, track } = resumeByTab.get(tabId) || (await trackFor(tabId, msg.job && msg.job.title));
+          const full = await loadProfile();
+          const tp = EdithShared.trackProfile(profile, track);
+          const extra = track === "pm" ? [instructions, full.pm_claude_instructions].filter(Boolean).join("\n") : instructions;
+          return await helper("/answer", { questions: msg.questions, job: msg.job, profile: tp, instructions: extra, resume_file, track });
         } catch (e) {
           // Helper not running or Claude failed: the questions stay empty.
           if (hunt.running) dbg("  Claude not available: " + e.message);
@@ -975,7 +1067,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           t.resolve({ status: "error", detail: "the page reloaded more than 3 times" });
           return { hunt: false, suppress: true };
         }
-        return { hunt: true, submit: t.submit, locations: t.locations, loc: t.job.loc || null, site: t.job.prov || "ashby" };
+        return { hunt: true, submit: t.submit, locations: t.locations, loc: t.job.loc || null, site: t.job.prov || "ashby",
+          manual: !!(PROVIDERS[t.job.prov] && PROVIDERS[t.job.prov].manualSubmit) };
       }
       case "huntManual": return { ok: manualDone(tabId) };
       case "huntGate": {

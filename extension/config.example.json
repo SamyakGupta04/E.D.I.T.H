@@ -82,6 +82,12 @@
     "transgender": "",
     "sexual_orientation": ""
   },
+  "pm": {
+    "pm_summary": "",
+    "pm_experience_focus": "",
+    "pm_cover_letter_template": "",
+    "pm_claude_instructions": ""
+  },
   "writing": {
     "cover_letter_template": "I am applying for the {role} role at {company}. {summary} {experience_focus} I would like to bring this experience to {company}.",
     "claude_instructions": ""
@@ -96,6 +102,7 @@
     "exclude_titles": ["Senior", "Sr.", "Sr", "Staff", "Principal", "Lead", "Manager", "Director", "Head of", "Intern"],
     "seed_ashby": [],
     "seed_greenhouse": [],
-    "seed_lever": []
+    "seed_lever": [],
+    "seed_keka": []
   }
 }

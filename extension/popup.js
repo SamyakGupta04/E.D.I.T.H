@@ -6,7 +6,7 @@ const HUNT_DEFAULTS = {
   locations: "Remote",
   exclude: "Senior, Sr., Sr, Staff, Principal, Lead, Manager, Director, Head of, Intern, III, IV, Architect",
   freshness: "m", pages: 3, maxJobs: 50, perCompany: 3, parallel: 2, huntSubmit: false, ownWindow: false, keepReview: false,
-  siteAshby: true, siteGreenhouse: true, siteLever: true,
+  siteAshby: true, siteGreenhouse: true, siteLever: true, siteKeka: true,
 };
 const $ = (id) => document.getElementById(id);
 const status = $("status");
@@ -90,13 +90,14 @@ $("start").onclick = async () => {
     maxJobs: clamp(c.maxJobs, 1, 300, 100),
     perCompany: clamp(c.perCompany, 1, 20, 3),
     keepReview: c.keepReview,
-    sites: [c.siteAshby && "ashby", c.siteGreenhouse && "greenhouse", c.siteLever && "lever"].filter(Boolean),
+    sites: [c.siteAshby && "ashby", c.siteGreenhouse && "greenhouse", c.siteLever && "lever", c.siteKeka && "keka"].filter(Boolean),
     parallel: clamp(c.parallel, 1, 4, 2),
     submit: c.huntSubmit,
     ownWindow: c.ownWindow,
   };
   // Chrome can withhold site access. Ask for it here: a request needs a click.
-  const need = { origins: ["https://www.google.com/*", "https://jobs.ashbyhq.com/*", "https://job-boards.greenhouse.io/*", "https://jobs.lever.co/*"] };
+  // Everything the hunt uses: job sites, their job lists, and the helper.
+  const need = { origins: (chrome.runtime.getManifest().host_permissions || []).filter((o) => c.siteKeka || !/keka\.com/.test(o)) };
   try {
     if (!(await chrome.permissions.contains(need))) await chrome.permissions.request(need);
   } catch (e) {}
@@ -110,6 +111,33 @@ $("copyDbg").onclick = (e) => {
   e.preventDefault();
   navigator.clipboard.writeText($("dbg").textContent);
   $("copyDbg").textContent = "copied";
+};
+
+// Excel file: sheet "Applied" (company, position, job link) and sheet "All jobs".
+// With the helper on, its log (data/log.csv) is merged in, so older
+// applications and the ones made outside a hunt are in the file too.
+$("xlsx").onclick = async () => {
+  const { huntLog = [] } = await chrome.storage.local.get("huntLog");
+  let older = [];
+  try {
+    const r = await fetch("http://127.0.0.1:8765/applications");
+    // The helper log has local time without a zone: the browser reads it as local time.
+    if (r.ok) older = ((await r.json()).rows || []).map((e) => ({ ...e, detail: e.note }));
+  } catch (e) {}
+  const all = EdithXlsx.mergeApplications([...older, ...huntLog]);
+  const when = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace("T", " ");
+  const applied = all.filter((r) => r.status === "submitted");
+  const blob = EdithXlsx.workbook([
+    { name: "Applied", widths: [26, 52, 70, 18, 12],
+      rows: [["Company", "Position", "Job link", "Applied on", "Site"], ...applied.map((r) => [r.company, r.position, { link: r.link }, when(r.time), r.site])] },
+    { name: "All jobs", widths: [26, 52, 70, 16, 18, 12, 60],
+      rows: [["Company", "Position", "Job link", "Status", "Last update", "Site", "Note"], ...all.map((r) => [r.company, r.position, { link: r.link }, r.status, when(r.time), r.site, r.detail])] },
+  ]);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `applications-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  $("xlsx").textContent = `Excel (${applied.length} applied)`;
 };
 
 $("csv").onclick = async () => {
@@ -205,6 +233,22 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 1000);
+
+// Chrome can withhold the extension's site access ("Site access: On click" or
+// "On specific sites"). Then job sites, job lists or the helper are out of
+// reach. One click on this line asks Chrome for all of it.
+const ALL_ORIGINS = { origins: chrome.runtime.getManifest().host_permissions || [] };
+async function checkAccess() {
+  const el = $("access");
+  if (await chrome.permissions.contains(ALL_ORIGINS)) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.onclick = async () => {
+    try { await chrome.permissions.request(ALL_ORIGINS); } catch (e) {}
+    checkAccess();
+    location.reload();
+  };
+}
+checkAccess();
 
 chrome.storage.local.get({ useClaude: true }).then(({ useClaude }) => {
   if (!useClaude) { status.textContent = "Claude: off. Built-in answers only."; return; }

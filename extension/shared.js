@@ -155,5 +155,21 @@
     return { state: "bad", home, loc: text };
   }
 
-  globalThis.EdithShared = { toProfile, toList, missingRequired, places, namedCountry, judgeLocation, countryWords, isUS, hasAny };
+  // The kind of job, from its title. It selects the resume and the tone of the
+  // written answers. "pm": product management. "ai": AI and ML. "sde": the rest.
+  const PM_TITLE = /\b(product manager|product management|apm|associate product|product owner|product lead|group product|technical product|head of product|vp of product|chief product)\b/i;
+  const AI_TITLE = /\b(ai|ml|genai|gen ai|llms?|nlp|mlops|machine learning|deep learning|artificial intelligence|generative|agentic|computer vision|data scien\w*|applied scien\w*|research (engineer|scientist))\b/i;
+  function jobTrack(title) {
+    const t = String(title || "");
+    return PM_TITLE.test(t) ? "pm" : AI_TITLE.test(t) ? "ai" : "sde";
+  }
+  // The profile for one track. Product roles use their own summary, main
+  // achievement and cover letter, when the Settings have them.
+  function trackProfile(p, track) {
+    if (track !== "pm") return p;
+    return { ...p, summary: p.pm_summary || p.summary, experience_focus: p.pm_experience_focus || p.experience_focus,
+      cover_letter_template: p.pm_cover_letter_template || p.cover_letter_template };
+  }
+
+  globalThis.EdithShared = { toProfile, toList, missingRequired, places, namedCountry, judgeLocation, countryWords, isUS, hasAny, jobTrack, trackProfile };
 })();

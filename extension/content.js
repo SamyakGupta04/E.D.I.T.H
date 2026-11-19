@@ -11,7 +11,7 @@
     /amazon\.jobs$/, /greenhouse\.io$/, /lever\.co$/, /eightfold\.ai$/,
     /smartrecruiters\.com$/, /icims\.com$/, /successfactors\.(com|eu)$/,
     /oraclecloud\.com$/, /taleo\.net$/, /ashbyhq\.com$/, /workable\.com$/,
-    /careers\.microsoft\.com$/, /jobs\.careers\.microsoft\.com$/,
+    /careers\.microsoft\.com$/, /jobs\.careers\.microsoft\.com$/, /keka\.com$/,
   ];
   const host = location.hostname;
   const onAts =
@@ -101,6 +101,25 @@
     return undefined; // no rule
   }
 
+  // A location list can hold cities, states or only countries. The answer is
+  // the most exact place that the list has: city, then state, then country.
+  const CITY_ALIAS = { gurugram: "Gurgaon", gurgaon: "Gurugram", bengaluru: "Bangalore", bangalore: "Bengaluru",
+    mumbai: "Bombay", chennai: "Madras", kolkata: "Calcutta", "new delhi": "Delhi", delhi: "New Delhi" };
+  function placeCandidates(label) {
+    if (label.length > MAX_RULE_LABEL) return null;
+    const hit = RULES.find(([re]) => re.test(label));
+    const key = hit && hit[1];
+    if (!["city", "state", "country"].includes(key)) return null;
+    const city = String(profile.city || "").trim(), state = String(profile.state || "").trim(), country = String(profile.country || "").trim();
+    const alias = CITY_ALIAS[city.toLowerCase()] || "";
+    const list = key === "city" ? [city, alias, state, country] : key === "state" ? [state, country] : [country];
+    const cands = list.filter(Boolean);
+    if (!cands.length) return null;
+    const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // The chosen option must name one of these places: never "the first option".
+    return { cands, must: new RegExp("(^|[^a-z])(" + cands.map(esc).join("|") + ")($|[^a-z])", "i") };
+  }
+
   // ---------- reading the page ----------
   function visible(el) {
     const r = el.getBoundingClientRect();
@@ -113,6 +132,8 @@
   const clean = (t) => (t || "").replace(/\s+/g, " ").replace(/\s*\*\s*$/, "").trim().slice(0, 300);
 
   function labelOf(el) {
+    // A CAPTCHA box has no label of its own: the text near it is not its name.
+    if (/captcha/i.test(`${el.id} ${el.name} ${el.placeholder || ""}`)) return "Captcha";
     let t = "";
     const by = el.getAttribute("aria-labelledby");
     if (by) t = by.split(/\s+/).map((id) => textOf(document.getElementById(id))).join(" ");
@@ -161,6 +182,7 @@
 
   function collect() {
     const items = [];
+    const boxes = [];
     const radioGroups = new Map();
     const nodes = document.querySelectorAll(
       'input, textarea, select, button[aria-haspopup="listbox"], [role="combobox"]:not(input)'
@@ -181,10 +203,14 @@
         radioGroups.get(key).push(el);
         continue;
       }
-      if (!visible(el)) continue;
       if (type === "checkbox") {
-        items.push({ kind: "checkbox", el, label: labelOf(el), type: "checkbox" });
-      } else if (tag === "select") {
+        // Many forms hide the native box and draw their own. The label is then the visible part.
+        const lab = el.closest("label") || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`));
+        if (visible(el) || visible(el.parentElement) || (lab && visible(lab))) boxes.push(el);
+        continue;
+      }
+      if (!visible(el)) continue;
+      if (tag === "select") {
         items.push({ kind: "select", el, label: labelOf(el), type: "select",
           options: [...el.options].map(optionText).filter((t) => t && !PLACEHOLDER.test(t)) });
       } else if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox") {
@@ -202,6 +228,29 @@
       if (!shown.length) continue;
       items.push({ kind: "radio", el: shown[0], radios: shown, label: groupLabel(shown[0]), type: "radio",
         options: shown.map((r) => labelOf(r)) });
+    }
+    // Checkboxes. Two or more boxes of one question are one multi-choice
+    // group. A single box (consent, terms) is one item.
+    const groups = new Map();
+    for (const el of boxes) {
+      let c = el.closest('.ashby-application-form-field-entry, fieldset, [role="group"]');
+      // The container is a question only when it holds no other kind of field.
+      if (c && c.querySelector('input:not([type="checkbox"]):not([type="hidden"]), textarea, select')) c = null;
+      const key = c || (el.name && boxes.filter((b) => b.name === el.name).length > 1 ? "name:" + el.name : el);
+      if (!groups.has(key)) groups.set(key, { c, list: [] });
+      groups.get(key).list.push(el);
+    }
+    for (const { c, list } of groups.values()) {
+      if (list.length === 1) {
+        items.push({ kind: "checkbox", el: list[0], label: labelOf(list[0]), type: "checkbox" });
+        continue;
+      }
+      const title = c && c.querySelector(":scope > label, :scope > legend, legend, .ashby-application-form-question-title");
+      const label = clean(textOf(title && !title.querySelector("input") ? title : null)) || groupLabel(list[0]);
+      items.push({ kind: "checkgroup", el: list[0], boxes: list, label, type: "checkbox-group",
+        options: list.map((b) => labelOf(b)),
+        required: list.some((b) => b.required || b.getAttribute("aria-required") === "true") ||
+          /\*\s*$/.test(textOf(title)) || /required/i.test((title && title.className) || "") });
     }
     // Ashby Yes/No button pairs.
     for (const box of document.querySelectorAll(".ashby-application-form-field-entry")) {
@@ -222,6 +271,7 @@
       case "select": return el.selectedIndex <= 0 || !el.value || PLACEHOLDER.test(optionText(el.options[el.selectedIndex]));
       case "radio": return !it.radios.some((r) => r.checked);
       case "checkbox": return !el.checked;
+      case "checkgroup": return !it.boxes.some((b) => b.checked);
       case "yesno": return !it.buttons.some((b) => /_active_/.test(b.className));
       case "combo": {
         let shown = clean(el.value !== undefined && el.tagName === "INPUT" ? el.value : textOf(el));
@@ -307,6 +357,15 @@
   const closeListbox = (el) =>
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
+  // Ticks a checkbox. A click on the box is the normal way. Some forms react
+  // only to a click on the label, so that is the second try.
+  function tick(el) {
+    el.click();
+    if (el.checked) return;
+    const lab = el.closest("label") || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`));
+    if (lab) lab.click();
+  }
+
   async function apply(it, value) {
     const el = it.el;
     if (value === null || value === undefined || value === "") return false;
@@ -327,13 +386,25 @@
         }
         // Lever: the location field keeps a value only when it comes from its own list.
         if (el.id === "location-input" && /lever\.co$/.test(host)) {
-          typeInto(el, value);
-          const hit = await waitFor(() => [...document.querySelectorAll(".dropdown-location")].find(visible), 3000, 200);
-          if (!hit) { typeInto(el, ""); return false; }
-          hit.click();
-          await sleep(200);
-          return true;
+          // Lever searches as you type. "Gurugram" can have no result while
+          // "Gurgaon" has one, so the other name, the state and the country
+          // are tried too. Only a result that names the place is taken.
+          const names = [value, CITY_ALIAS[String(value).toLowerCase()], profile.state, profile.country].filter(Boolean);
+          for (const name of [...new Set(names)]) {
+            typeInto(el, name);
+            // Lever starts its search on a key press, and takes a result on mousedown.
+            el.dispatchEvent(new KeyboardEvent("keydown", { key: name.slice(-1), bubbles: true }));
+            const hit = await waitFor(() => [...document.querySelectorAll(".dropdown-location")]
+              .find((o) => visible(o) && norm(textOf(o)).split(" ").includes(norm(name).split(" ")[0])), 4000, 250);
+            if (!hit) continue;
+            hit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window, button: 0 }));
+            await sleep(300);
+            return el.value !== "";
+          }
+          typeInto(el, "");
+          return false;
         }
+        if (el.type === "date" && /^\d{2}\/\d{2}\/\d{4}$/.test(value)) value = value.split("/").reverse().join("-");
         setNative(el, value);
         return el.value !== ""; // false when the field refused the value
       case "select": {
@@ -350,8 +421,20 @@
         return true;
       }
       case "checkbox":
-        if (/^(true|yes)$/i.test(value) && !el.checked) el.click();
+        if (/^(true|yes)$/i.test(value) && !el.checked) tick(el);
         return true;
+      case "checkgroup": {
+        // One or more options, separated by ";" or a new line.
+        let done = false;
+        for (const part of String(value).split(/\s*[;\n|]\s*/).filter(Boolean)) {
+          const i = pick(it.options, part);
+          if (i === -1 || (it.must && !it.must.test(it.options[i]))) continue;
+          if (!it.boxes[i].checked) tick(it.boxes[i]);
+          done = true;
+        }
+        if (done) await sleep(100);
+        return done;
+      }
       case "yesno": {
         const i = pick(it.options, value);
         if (i === -1) return false;
@@ -367,7 +450,9 @@
         // "Accounting" for the discipline).
         const fixedList = opts.length > 0;
         let i = pick(opts.map(optionText), value);
-        if (i === -1 && el.tagName === "INPUT") {
+        // A short fixed list shows all its options: typing cannot find more.
+        // A long list can load more on search (schools), so typing is tried.
+        if (i === -1 && el.tagName === "INPUT" && !(fixedList && opts.length < 30)) {
           // 2. Type the value. A typeahead then lists its matches, and its
           //    first match is the best one.
           typeInto(el, value);
@@ -405,12 +490,12 @@
     const inputs = [...document.querySelectorAll('input[type="file"]')].filter((f) => !f.files || !f.files.length);
     // Ashby: the first file input is "Autofill from resume". The real field is
     // _systemfield_resume. Greenhouse and Lever also have a known resume input.
-    const known = document.querySelector('#_systemfield_resume, input#resume[type="file"], #resume-upload-input, input[type="file"][name="resume"]');
+    const known = document.querySelector('#_systemfield_resume, input#resume[type="file"], #resume-upload-input, input[type="file"][name="resume"], input#resume-upload[type="file"]');
     const target = known ? (inputs.includes(known) ? known : null)
       : inputs.find((f) => !/cover|autofill/i.test(labelOf(f) + " " + f.id + " " + f.name));
     if (!target || target.dataset.edithUploaded) return false;
     try { sessionStorage.setItem(appKey(), "1"); } catch (e) {}
-    const r = await send("resume");
+    const r = await send("resume", { title: document.title });
     if (!r.b64) {
       resumeError = r.error || "resume.pdf not found";
       try { sessionStorage.removeItem(appKey()); } catch (e) {}
@@ -528,8 +613,10 @@
   const DEFAULT_TEMPLATE = "I am applying for the {role} role at {company}. {summary} {experience_focus} " +
     "I would like to bring this experience to {company}.";
   function pitch(p) {
-    if (!p.summary && !p.cover_letter_template) return ASK; // Claude writes it from the resume
     const j = jobInfo();
+    // A product management job uses the product summary and cover letter.
+    p = EdithShared.trackProfile(p, EdithShared.jobTrack(j.role + " " + document.title));
+    if (!p.summary && !p.cover_letter_template) return ASK; // Claude writes it from the resume
     const vars = { role: j.role, company: j.company, summary: p.summary || "", experience_focus: p.experience_focus || "",
       name: p.full_name || "", first_name: p.first_name || "", current_title: p.current_title || "",
       current_company: p.current_company || "", years: p.total_experience_years || "" };
@@ -623,6 +710,11 @@
     [/\b(based|located|residing|reside|resident|live|living)\b.{0,25}\bin\b/i,
       (p, l) => ({ home: ["Yes"], foreign: ["No"], none: ASK })[EdithShared.namedCountry(l, pl().home)], true],
     [/relocat/i, (p) => yn(p.willing_to_relocate), true],
+    // "Do you plan to work remotely?": the office answer, unless your work mode is Remote.
+    [/(plan|intend|prefer|want|wish|like) to work (remote|from (a )?remote|from home)/i,
+      (p) => (/remote/i.test(p.work_mode_preference || "") ? ["Yes"]
+        : ["No", "No, I intend to work from the office", "No, I plan to work from an office", "On-site", "Office"]),
+      false, (p) => (/remote/i.test(p.work_mode_preference || "") ? /^yes\b|remote/i : /^no\b|office|on-?\s?site/i)],
     // Willingness, availability and commitment questions (travel, team meet-ups,
     // on-call, shifts, working hours). Not when the question names a country
     // where you cannot work: that is a work-permit matter.
@@ -643,14 +735,28 @@
     [/currently (a )?(student|enrolled)|still (a )?student/i, (p) => yn(p.currently_student), true],
     [/whatsapp|sms|text messages/i, (p) => yn(p.sms_consent), true],
     [/(were you|are you being|have you been) referred/i, (p) => yn(p.were_referred), true],
+    // "I will use only my own words, no AI": that statement is yours to make.
+    [/own words|without (the )?(use|help|assistance) of (ai|artificial)|use of (ai|artificial intelligence|chatgpt|generative)|ai[- ]generated|plagiari/i, (p, l) => askYou(l), true],
     [/i (agree|consent|acknowledge|confirm|certify|have read|understand)|privacy|terms (and|&) conditions|consent|acknowledg/i,
       (p) => yn(p.agree_to_terms), true],
     [/notice period/i, (p, l) => (!hasNotice(p) ? ASK : /week/i.test(l) ? [String(Math.round(noticeDays(p) / 7))]
       : /month/i.test(l) ? [String(Math.max(1, Math.round(noticeDays(p) / 30)))]
       : [`${noticeDays(p)} days`, `${noticeDays(p)}`])],
     [/(expected|desired) (annual )?(ctc|salary|compensation|pay|base)|salary expectation|compensation expectation/i,
-      (p) => [p.expected_salary]],
-    [/current (annual )?(ctc|salary|compensation|base)/i, (p) => [p.current_salary]],
+      (p) => [/keka\.com$/.test(host) ? rupees(p.expected_salary) : p.expected_salary]],
+    [/current (annual )?(ctc|salary|compensation|base)/i, (p) => [/keka\.com$/.test(host) ? rupees(p.current_salary) : p.current_salary]],
+    // A yearly amount in rupees, when the question asks for INR.
+    [/(current|present).{0,40}(compensation|salary|ctc).{0,30}(inr|₹|rupees)/i, (p) => [rupees(p.current_salary)]],
+    [/(expected|desired).{0,40}(compensation|salary|ctc).{0,30}(inr|₹|rupees)/i, (p) => [rupees(p.expected_salary)]],
+    // Date of birth, as day/month/year. A date field gets it in its own format.
+    [/date of birth|\bdob\b|birth ?date|birthday/i, (p) => (known(p.date_of_birth) ? [String(p.date_of_birth).split("-").reverse().join("/")] : null)],
+    // "Do you need a work visa?": No for a job in a country where you can work, Yes for the rest.
+    [/(need|require) (a |an )?(work |employment )?visa\b/i, (p, l) => elig(l, false), true],
+    // A CAPTCHA is for you. Nothing writes into it.
+    [/captcha/i, () => null],
+    // Keka: "Experience" is the number of years.
+    [/^experience\*?$/i, (p) => [String(p.total_experience_years || "")]],
+    [/available to join.{0,12}days|notice.{0,12}days|\(in days\)/i, (p) => (hasNotice(p) ? [String(noticeDays(p))] : ASK)],
     // "Do you have 3+ years of experience in X?": true answer from the profile.
     // More years than the profile has: no automatic answer. The tab stays open for you.
     [/(\d+)\s*\+?\s*(years|yrs)/i, (p, l) => (!known(p.total_experience_years) ? ASK
@@ -701,7 +807,7 @@
     [/experience|proficien|familiar with|worked (with|on)|hands-on|have you (built|shipped|deployed|developed|contributed|used)/i,
       // A skill that the profile does not have: no automatic answer. The tab stays open for you.
       (p, l) => (skillHit(p, l) ? ["Yes"] : askYou(l)), true],
-    [/cover letter|why .*(join|interested|apply|company|role|us\b|work (at|with|here))|tell us (about|a bit)|about yourself|introduce yourself|additional information|anything else|what excites/i,
+    [/cover letter|why .*(join|interested|apply|company|role|us\b|work (at|with|here))|tell us (a (bit|little) )?(more )?about (yourself|you\b)|about yourself|introduce yourself|additional information|anything else|what excites/i,
       (p) => pitch(p)],
   ];
 
@@ -759,6 +865,14 @@
   }
 
   // undefined: use the profile rules and Claude. null: leave empty. array: candidates.
+  // "15 LPA fixed + 3 lakh ESOPs" -> "1500000": a yearly amount in rupees, for a field that takes a plain number.
+  function rupees(text) {
+    const m = String(text || "").match(/(\d+(?:\.\d+)?)\s*(lpa|lakhs?|lacs?|l\b|cr|crores?)?/i);
+    if (!m) return "";
+    const unit = (m[2] || "").toLowerCase();
+    return String(Math.round(Number(m[1]) * (/^cr/.test(unit) ? 1e7 : unit ? 1e5 : 1)));
+  }
+
   function answerFor(it) {
     const custom = customAnswer(it.label);
     if (custom) { it.must = null; return custom; }
@@ -832,7 +946,24 @@
           for (const c of cands) if (await apply(it, c)) { ok = true; break; }
           if (ok) { byRule++; continue; }
         }
-        if (it.kind !== "checkbox" && it.type !== "textarea") {
+        // Location lists: city, then state, then country, whichever the list has.
+        const place = it.kind !== "text" && it.kind !== "checkbox" ? placeCandidates(it.label) : null;
+        if (place) {
+          it.must = place.must;
+          let ok = false;
+          for (const c of place.cands) if (await apply(it, c)) { ok = true; break; }
+          if (ok) { byRule++; continue; }
+          it.must = null;
+        }
+        // A group of place names as checkboxes ("which countries / offices"):
+        // tick your country and your home cities.
+        if (it.kind === "checkgroup") {
+          const mine = [profile.country, profile.city, CITY_ALIAS[String(profile.city || "").toLowerCase()],
+            ...toList(profile.preferred_locations)].filter(Boolean).filter((v) => !/^remote$/i.test(v));
+          const hits = it.options.filter((o) => mine.some((m) => norm(o) === norm(m)));
+          if (hits.length && (await apply(it, hits.join(";")))) { byRule++; continue; }
+        }
+        if (it.kind !== "checkbox" && it.kind !== "checkgroup" && it.type !== "textarea") {
           const v = ruleValue(it.label);
           if (v === null) continue; // the profile field is empty: leave it for you
           if (v !== undefined && (await apply(it, v))) { byRule++; continue; }
@@ -940,11 +1071,13 @@
   }
 
   // The resume field of Ashby, Greenhouse and Lever.
-  const RESUME_INPUT = '#_systemfield_resume, input#resume[type="file"], #resume-upload-input, input[type="file"][name="resume"]';
+  const RESUME_INPUT = '#_systemfield_resume, input#resume[type="file"], #resume-upload-input, input[type="file"][name="resume"], input#resume-upload[type="file"]';
   // The site shows the file name near the field when the upload is complete.
   function resumeState() {
     const input = document.querySelector(RESUME_INPUT);
     if (!input) return "none";
+    const kekaName = document.querySelector('input#resume[type="text"]'); // Keka shows the file name in a text field
+    if (kekaName && /\.(pdf|docx?)$/i.test(kekaName.value || "")) return "done";
     const ok = document.querySelector(".resume-upload-success"); // Lever
     if (ok && visible(ok)) return "done";
     let box = input.closest(".ashby-application-form-field-entry") || input.parentElement;
@@ -1008,7 +1141,8 @@
       badge("hunt: waiting for the form…");
       const FORM = { ashby: "#_systemfield_email, #_systemfield_name, .ashby-application-form-field-entry",
         greenhouse: "#application-form #first_name, form #first_name, #application-form input",
-        lever: 'form#application-form input[name="name"], form input[name="email"]' }[h.site || "ashby"];
+        lever: 'form#application-form input[name="name"], form input[name="email"]',
+        keka: '#firstName, input[name="firstName"]' }[h.site || "ashby"];
       const form = await waitFor(() => document.querySelector(FORM), 25000);
       if (!form) {
         const closed = /no longer (accepting|available)|not found|job (is )?closed|position (has been )?filled/i.test(textOf(document.body));
@@ -1032,6 +1166,20 @@
       const main = document.querySelector("main, [role=main]") || document.body;
       await send("saveJob", { job: { url: location.href, title: document.title, company: companyFromHost() === "jobs" ? location.pathname.split("/")[1] : companyFromHost(),
         description: textOf(main).slice(0, 6000) } });
+      // Keka and Lever read the resume and then set fields from it (Lever also
+      // clears the location). So the resume goes first, and EDITH fills after it.
+      if (h.site === "keka" || h.site === "lever") {
+        badge("hunt: attaching the resume first…");
+        await getProfile();
+        await uploadResume();
+        await waitFor(() => resumeState() === "done", 15000, 1000);
+        await sleep(3000);
+        // The phone country code is a plain list of codes with no label (Keka).
+        const code = document.getElementById("mobilePhone.countryCode");
+        const want = String(profile.phone_country_code || "").trim();
+        const opt = code && want && [...code.options].find((o) => clean(o.text) === want || o.value === want);
+        if (opt && code.value !== opt.value) setNative(code, opt.value);
+      }
       // Pass 1 fills everything. Later passes fill fields that appear after an answer.
       // At most 4 passes: no endless loop.
       for (let pass = 0; pass < 4; pass++) {
@@ -1057,7 +1205,16 @@
       if ((await send("huntGate")).rateLimited) return report("rate_limited", "the job site answered 429 (too many requests)");
       if (resumeState() === "pending") return report("needs_review", "resume upload did not complete");
       const missing = missingRequired();
-      const yours = [...yourQuestions].filter((l) => missing.some((m) => m.label === l));
+      // A site with a CAPTCHA that you type (Keka): the form is ready, and the
+      // tab stays open. You type the CAPTCHA and click the apply button.
+      if (h.manual) {
+        const rest = missing.filter((m) => !/captcha/i.test(m.label)).map((m) => m.label);
+        await report("needs_review", "type the CAPTCHA and submit" + (rest.length ? ". Also empty: " + rest.join("; ") : ""), true);
+        return watchManual("form filled. Type the CAPTCHA, check the form, then click the apply button. This tab stays open.");
+      }
+      // A question of yours can be an empty field or an unticked required box.
+      const notValid = invalidFields();
+      const yours = [...yourQuestions].filter((l) => missing.some((m) => m.label === l) || notValid.includes(l));
       if (yours.length) {
         await report("needs_review", "your answer is needed: " + yours.join("; "), true);
         return watchManual("answer the orange question(s), then click Submit. This tab stays open.");
@@ -1110,7 +1267,7 @@
   captureJob();
   chrome.storage.local.get({ autoFill: true, enabled: true }).then(async ({ autoFill, enabled }) => {
     if (!onAts || !enabled) return;
-    if (window === window.top && /(ashbyhq\.com|greenhouse\.io|lever\.co)$/.test(host)) {
+    if (window === window.top && /(ashbyhq\.com|greenhouse\.io|lever\.co|keka\.com)$/.test(host)) {
       const h = await send("huntTab");
       if (h.suppress) return; // this hunt tab loaded too many times: do nothing
       if (h.kept) return watchManual(); // left open for you after a failed submit

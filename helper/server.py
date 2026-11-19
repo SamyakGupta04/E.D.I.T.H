@@ -34,30 +34,35 @@ LONG_TYPES = {"textarea"}
 cache_lock = threading.Lock()
 log_lock = threading.Lock()
 resume_lock = threading.Lock()
-_resume = {"mtime": None, "text": ""}
+_resume = {}  # file name -> {"mtime", "text"}
+RESUME_FILES = ("resume.pdf", "resume_ai.pdf", "resume_apm.pdf")  # default, and the optional one for AI and ML roles
 
 
-def resume_text():
-    """Text of extension/resume.pdf, read again when the file changes."""
-    if not RESUME_PDF.is_file():
-        return ""
+def resume_text(name="resume.pdf"):
+    """Text of one resume in extension/, read again when the file changes."""
+    if name not in RESUME_FILES:
+        name = "resume.pdf"
+    path = ROOT / "extension" / name
+    if not path.is_file():
+        return resume_text() if name != "resume.pdf" else ""
     with resume_lock:
-        mtime = RESUME_PDF.stat().st_mtime
-        if _resume["mtime"] == mtime:
-            return _resume["text"]
+        mtime = path.stat().st_mtime
+        hit = _resume.get(name)
+        if hit and hit["mtime"] == mtime:
+            return hit["text"]
         text = ""
         try:
             from pypdf import PdfReader
-            text = "\n".join(page.extract_text() or "" for page in PdfReader(str(RESUME_PDF)).pages)
+            text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
         except ImportError:
             if shutil.which("pdftotext"):
-                out = subprocess.run(["pdftotext", "-layout", str(RESUME_PDF), "-"],
+                out = subprocess.run(["pdftotext", "-layout", str(path), "-"],
                                      capture_output=True, text=True, timeout=30)
                 text = out.stdout
         except Exception as e:  # a damaged PDF: Claude then uses the profile only
-            print("[warn] cannot read resume.pdf:", e)
-        _resume.update(mtime=mtime, text=text.strip())
-        return _resume["text"]
+            print(f"[warn] cannot read {name}:", e)
+        _resume[name] = {"mtime": mtime, "text": text.strip()}
+        return _resume[name]["text"]
 
 
 def cache_key(q):
@@ -84,6 +89,7 @@ def write_cache(new_entries):
 SYSTEM_PROMPT = """You fill job application forms for one candidate. Answer as the candidate, truthfully, from the PROFILE and RESUME only.
 Rules:
 - If a question has options, the answer must be one of the options, copied exactly.
+- Questions of type "checkbox-group" have several options: answer with the option or options that apply, copied exactly, separated by "; ".
 - Checkbox questions: answer "true" or "false". Agree to privacy, consent and terms checkboxes only if agree_to_terms is "Yes".
 - Yes/no questions: use the profile facts. Never invent degrees, employers, certifications, skills, or years of experience. If the profile and resume do not support "Yes", answer "No" or "".
 - Work authorization: the candidate can work without sponsorship only in authorized_countries (if that list is empty: in the profile country). The candidate needs visa sponsorship everywhere else. Answer for the country that the question or the job names. If no country is clear, answer "".
@@ -170,11 +176,21 @@ def snap_to_option(value, options):
     return ""
 
 
-def answer_questions(questions, job, profile, instructions):
+PM_RULES = """This job is a product management role (Product Manager, APM, Product Owner). Write as a candidate for product work:
+- Lead with users, problems, outcomes, metrics, prioritization, trade-offs and work across teams. Take the examples from the resume.
+- Describe engineering work as product work that the candidate drove: discovery, launch criteria, adoption, measured results.
+- Be honest about titles: the current title is in the profile. Do not claim a Product Manager title or years as a product manager that the resume does not show.
+- "Why product management?": connect the candidate's product ownership in the current job with the wish to do it full-time."""
+
+
+def answer_questions(questions, job, profile, instructions, resume_file="resume.pdf", track="sde"):
+    if track == "pm":
+        instructions = (PM_RULES + "\n" + (instructions or "")).strip()
+    pre = "pm::" if track == "pm" else ""  # product roles keep their own saved answers
     cache = read_cache()
     answers, todo = {}, []
     for q in questions:
-        key = cache_key(q)
+        key = pre + cache_key(q)
         if key in cache:
             answers[q["id"]] = cache[key]
         else:
@@ -182,7 +198,7 @@ def answer_questions(questions, job, profile, instructions):
 
     short = [q for q in todo if q.get("type") not in LONG_TYPES]
     long_ = [q for q in todo if q.get("type") in LONG_TYPES]
-    resume = resume_text()
+    resume = resume_text(resume_file)
     batches = [(FAST_MODEL, short), (WRITER_MODEL, long_)]
     new_cache = {}
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -194,7 +210,7 @@ def answer_questions(questions, job, profile, instructions):
                 answers[q["id"]] = val
                 # Long answers are job-specific, so only short ones go in the cache.
                 if val != "" and q.get("type") not in LONG_TYPES:
-                    new_cache[cache_key(q)] = val
+                    new_cache[pre + cache_key(q)] = val
     if new_cache:
         write_cache(new_cache)
     return answers, len(todo)
@@ -219,8 +235,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
+        self._cors()
         self.end_headers()
         self.wfile.write(raw)
+
+    def _cors(self):
+        # Lets a browser extension read the answer also when Chrome withholds
+        # its site access. Web pages get no such header, so they stay blocked.
+        origin = self.headers.get("Origin") or ""
+        if origin.startswith("chrome-extension://"):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def do_OPTIONS(self):  # the browser asks first, before a POST with JSON
+        if not self._allowed():
+            return self._send(403, {"error": "forbidden"})
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _allowed(self):
         # Only the extension (or a local tool without an Origin) may call the
@@ -237,6 +273,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "forbidden"})
         if self.path == "/health":
             return self._send(200, {"ok": True, "resume": RESUME_PDF.is_file(), "resume_text": bool(resume_text())})
+        if self.path == "/applications":  # the application log, for the popup's Excel file
+            rows = []
+            if LOG_PATH.is_file():
+                with log_lock, open(LOG_PATH, newline="", encoding="utf-8") as f:
+                    rows = list(csv.DictReader(f))
+            return self._send(200, {"rows": rows})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -247,7 +289,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/answer":
                 t0 = datetime.now()
                 answers, asked = answer_questions(body.get("questions", []), body.get("job", {}),
-                                                  body.get("profile", {}), body.get("instructions", ""))
+                                                  body.get("profile", {}), body.get("instructions", ""),
+                                                  str(body.get("resume_file") or "resume.pdf"),
+                                                  str(body.get("track") or "sde"))
                 ms = int((datetime.now() - t0).total_seconds() * 1000)
                 print(f"[answer] {len(answers)} answers, {asked} from Claude, {ms} ms")
                 return self._send(200, {"answers": answers})
@@ -270,5 +314,13 @@ if __name__ == "__main__":
         print(f"[warn] {RESUME_PDF} not found. Claude answers from the profile only.")
     elif not resume_text():
         print("[warn] cannot read text from resume.pdf. Install pypdf: pip install pypdf")
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as e:
+        if e.errno in (48, 98):  # address already in use (macOS, Linux)
+            print(f"The helper is already running on http://{HOST}:{PORT}. You do not need to start it again.")
+            print(f"To restart it, stop the old one first:  lsof -ti tcp:{PORT} | xargs kill")
+            raise SystemExit(0)
+        raise
     print(f"EDITH helper on http://{HOST}:{PORT}")
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    server.serve_forever()

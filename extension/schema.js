@@ -93,6 +93,13 @@ const EDITH_SCHEMA = [
     ["transgender", "Transgender", { type: "yesno" }],
     ["sexual_orientation", "Sexual orientation"],
   ] },
+  { id: "pm", title: "Product management roles", fields: [
+    ["pm_summary", "Summary for product roles", { type: "textarea",
+      help: "Used for jobs with Product Manager, APM or Product Owner in the title. Empty: the normal summary. These jobs get extension/resume_apm.pdf." }],
+    ["pm_experience_focus", "Main achievement for product roles", { type: "textarea" }],
+    ["pm_cover_letter_template", "Cover letter template for product roles", { type: "textarea", help: "Same placeholders as the normal template." }],
+    ["pm_claude_instructions", "Extra instructions for Claude on product roles", { type: "textarea" }],
+  ] },
   { id: "writing", title: "Long answers", fields: [
     ["cover_letter_template", "Cover letter / \"why us\" template", { type: "textarea",
       help: "Placeholders: {role} {company} {summary} {experience_focus} {name} {first_name} {current_title} {current_company} {years}. Empty: a short default text. With no summary and no template, Claude writes these answers." }],
@@ -109,4 +116,5 @@ const EDITH_HUNT_FIELDS = [
   ["seed_ashby", "Ashby companies to check first", { type: "list", help: "The company part of jobs.ashbyhq.com/<company>." }],
   ["seed_greenhouse", "Greenhouse companies to check first", { type: "list", help: "The company part of job-boards.greenhouse.io/<company>." }],
   ["seed_lever", "Lever companies to check first", { type: "list", help: "The company part of jobs.lever.co/<company>." }],
+  ["seed_keka", "Keka companies to check first", { type: "list", help: "The company part of <company>.keka.com/careers." }],
 ];

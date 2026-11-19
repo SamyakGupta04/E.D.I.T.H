@@ -115,6 +115,8 @@ async function status() {
   const chips = [];
   chips.push(s.missing.length ? ["err", "Missing: " + s.missing.join(", ")] : ["ok", "Profile complete"]);
   chips.push(s.resume ? ["ok", "resume.pdf found"] : ["err", "extension/resume.pdf missing"]);
+  chips.push(s.resumeAi ? ["ok", "resume_ai.pdf found (AI and ML roles)"] : ["ok", "no resume_ai.pdf: one resume for all roles"]);
+  if (s.resumePm) chips.push(["ok", "resume_apm.pdf found (product roles)"]);
   chips.push(s.configFile ? ["ok", "config.json found"] : ["", "No config.json (Settings only)"]);
   if (s.configError) chips.push(["err", s.configError]);
   try {

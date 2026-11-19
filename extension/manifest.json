@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "EDITH",
   "short_name": "EDITH",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "Fills job applications from your own profile and resume. Optional Claude helper for unknown questions, and a job hunt for Ashby, Greenhouse and Lever.",
   "icons": {
     "16": "icons/icon16.png",
@@ -26,7 +26,8 @@
     "https://boards.greenhouse.io/*",
     "https://boards-api.greenhouse.io/*",
     "https://jobs.lever.co/*",
-    "https://api.lever.co/*"
+    "https://api.lever.co/*",
+    "https://*.keka.com/*"
   ],
   "background": {
     "service_worker": "background.js"

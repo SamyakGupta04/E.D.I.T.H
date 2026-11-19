@@ -9,7 +9,7 @@ A Chrome extension that fills job applications from your own profile and resume.
 
 EDITH runs in your own Chrome, with your own logins. You write your answers once (name, contact, education, work permit, salary, common Yes/No questions). EDITH then fills application forms on Workday, Greenhouse, Lever, Ashby, SmartRecruiters, iCIMS, and most other sites, and it uploads your `resume.pdf`.
 
-An optional local helper sends the questions that EDITH does not know to the [Claude Code](https://claude.com/claude-code) CLI. A "job hunt" mode can find matching jobs on Ashby, Greenhouse and Lever and apply to them.
+An optional local helper sends the questions that EDITH does not know to the [Claude Code](https://claude.com/claude-code) CLI. A "job hunt" mode can find matching jobs on Ashby, Greenhouse, Lever and Keka and apply to them.
 
 ## Features
 
@@ -49,6 +49,7 @@ An optional local helper sends the questions that EDITH does not know to the [Cl
    cd E.D.I.T.H
    ```
 2. **Add your resume.** Copy your resume to `extension/resume.pdf`. The name must be exactly `resume.pdf`. Job sites receive it as `First_Last_Resume.pdf`.
+   Optional: add `extension/resume_ai.pdf` for AI and machine-learning jobs, and `extension/resume_apm.pdf` for product-management jobs. EDITH selects the resume from the job title. If a file is absent, EDITH uses `resume.pdf`.
 3. **Add your profile.** Use one of the two methods:
    - Copy `extension/config.example.json` to `extension/config.json` and replace the example values.
    - Or skip the file and fill the Settings page after step 4.
@@ -84,8 +85,9 @@ EDITH keeps the profile in Chrome storage. It reads `extension/config.json` each
 | `questions` | Yes/No: `over_18`, `flexible_availability`, `comfortable_onsite`, `previously_worked_here`, `relatives_working_here`, `non_compete`, `criminal_record`, `government_official`, `background_check_consent`, `english_fluent`, `sms_consent`, `were_referred`, `agree_to_terms`. Text: `how_did_you_hear` |
 | `demographics` | `gender`, `ethnicity`, `hispanic_or_latino`, `veteran_status`, `disability`, `transgender`, `sexual_orientation`. Empty: "Prefer not to say". |
 | `writing` | `cover_letter_template`, `claude_instructions` |
+| `pm` | Used for product-management jobs only: `pm_summary`, `pm_experience_focus`, `pm_cover_letter_template`, `pm_claude_instructions` |
 | `custom_answers` | A list of `{ "question": "...", "answer": "..." }` |
-| `hunt` | `roles`, `locations`, `exclude_titles`, `seed_ashby`, `seed_greenhouse`, `seed_lever` |
+| `hunt` | `roles`, `locations`, `exclude_titles`, `seed_ashby`, `seed_greenhouse`, `seed_lever`, `seed_keka` |
 
 Notes:
 
@@ -117,7 +119,9 @@ Popup switches:
 
 ## Job hunt (optional)
 
-The hunt finds jobs on Ashby, Greenhouse and Lever and applies to each one.
+The hunt finds jobs on Ashby, Greenhouse, Lever and Keka and applies to each one. Keka forms end with a CAPTCHA: EDITH fills the form and keeps the tab open, and you type the CAPTCHA and submit.
+
+**Download Excel** in the popup saves the company, position and job link of every application.
 
 1. One time: open `chrome://extensions` > EDITH > Details > **Site access**, and select **On all sites**. With "On click", Chrome does not let EDITH work in the job tabs.
 2. Open a new tab and open the popup. Make sure the switch at the top is ON.
@@ -166,7 +170,8 @@ Safety limits:
 | `extension/` | The Chrome extension (load this folder) |
 | `extension/config.example.json` | Example profile with fictional data |
 | `extension/config.json` | Your profile (git-ignored) |
-| `extension/resume.pdf` | Your resume (git-ignored) |
+| `extension/resume.pdf` | Your resume (git-ignored). Optional: `resume_ai.pdf`, `resume_apm.pdf` |
+| `extension/xlsx.js` | Excel export of the application log |
 | `extension/content.js` | Finds and fills form fields |
 | `extension/background.js` | Profile, resume, helper relay, job hunt |
 | `extension/shared.js` | Profile and location logic for both scripts |

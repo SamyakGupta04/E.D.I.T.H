@@ -64,7 +64,8 @@
   <h2>Job hunt (search → company job lists → apply)</h2>
   <div class="row" style="gap:10px"><label><input type="checkbox" id="siteAshby"> Ashby</label>
     <label><input type="checkbox" id="siteGreenhouse"> Greenhouse</label>
-    <label><input type="checkbox" id="siteLever"> Lever</label></div>
+    <label><input type="checkbox" id="siteLever"> Lever</label>
+    <label title="Keka forms end with a CAPTCHA: EDITH fills the form, you type the CAPTCHA and submit"><input type="checkbox" id="siteKeka"> Keka</label></div>
   <textarea id="roles" placeholder="One role per line"></textarea>
   <label style="flex-direction:column;align-items:stretch;gap:2px;font-size:11px;color:#555">Locations (comma separated, empty = any)
     <input type="text" id="locations"></label>
@@ -85,14 +86,17 @@
   <div class="stats-head"><span>This run <span id="elapsed"></span></span></div>
   <div class="stats" id="runStats"></div>
   <div id="current"></div>
-  <div class="stats-head"><span>All time</span><a id="csv">Download CSV</a></div>
+  <div class="stats-head"><span>All time</span><span><a id="xlsx" title="Company, position and job link of every application">Download Excel</a> · <a id="csv">CSV</a></span></div>
   <div class="stats" id="allStats"></div>
   <div class="stats-head"><span>Recent (click to open)</span><a id="huntDefaults" title="Roles, locations and skip words from Settings">Use Settings defaults</a></div>
   <div id="log"></div>
   <details id="dbgBox"><summary style="cursor:pointer;font-size:11px;margin-top:8px">Debug log <a id="copyDbg">copy</a></summary>
     <pre id="dbg" style="max-height:160px;overflow:auto;font-size:10px;white-space:pre-wrap;background:#f3f4f6;padding:4px;margin:4px 0"></pre></details>
   <a id="reset">Clear history (jobs already seen will open again)</a>
+  <div id="access" style="display:none;margin-top:8px;padding:6px 8px;border-radius:6px;background:#fef3c7;color:#92400e;cursor:pointer">
+    Chrome limits this extension's site access. <u>Click here to allow it</u> for the job sites and the helper.</div>
   <div id="status"></div>
+  <script src="xlsx.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
