@@ -214,7 +214,8 @@ const PROVIDERS = {
       const places = [j, ...(j.secondaryLocations || [])];
       return { id: String(j.id).toLowerCase(), title: j.title, listed: j.isListed !== false,
         loc: places.map((p) => p.location).filter(Boolean).join("; "),
-        country: places.map((p) => p.address && p.address.postalAddress && p.address.postalAddress.addressCountry).filter(Boolean).join("; ") };
+        country: places.map((p) => p.address && p.address.postalAddress && p.address.postalAddress.addressCountry).filter(Boolean).join("; "),
+        minYears: EdithShared.yearsNeeded(j.descriptionPlain || j.descriptionHtml) };
     }),
     applyUrl: (org, id) => `https://jobs.ashbyhq.com/${encodeURIComponent(org)}/${id}/application`,
     key: (org, id) => (org + "/" + id).toLowerCase(), // no prefix: the same keys as the older versions
@@ -229,8 +230,10 @@ const PROVIDERS = {
       return m ? { org: decodeURIComponent(m[1]).toLowerCase(), id: m[2] } : null;
     },
     org: (href) => { const m = href.match(/^https?:\/\/(?:job-boards|boards)\.greenhouse\.io\/(?!embed\b)([^\/?#]+)/i); return m ? decodeURIComponent(m[1]).toLowerCase() : null; },
-    listUrl: (org) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(org)}/jobs`,
-    jobs: (d) => (d.jobs || []).map((j) => ({ id: String(j.id), title: j.title, listed: true, loc: (j.location && j.location.name) || "", country: "" })),
+    // content=true adds the job description: the experience filter reads it.
+    listUrl: (org) => `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(org)}/jobs?content=true`,
+    jobs: (d) => (d.jobs || []).map((j) => ({ id: String(j.id), title: j.title, listed: true, loc: (j.location && j.location.name) || "", country: "",
+      minYears: EdithShared.yearsNeeded(j.content) })),
     // The direct form address. It works also for companies that show the job on their own site.
     applyUrl: (org, id) => `https://job-boards.greenhouse.io/embed/job_app?for=${encodeURIComponent(org)}&token=${id}`,
     key: (org, id) => `greenhouse:${org}/${id}`.toLowerCase(),
@@ -246,7 +249,8 @@ const PROVIDERS = {
       const c = j.categories || {};
       return { id: String(j.id).toLowerCase(), title: j.text, listed: true,
         loc: [c.location, ...(c.allLocations || [])].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join("; "),
-        country: j.country || "" }; // an ISO code such as "IN": shared.js reads it
+        country: j.country || "", // an ISO code such as "IN": shared.js reads it
+        minYears: EdithShared.yearsNeeded([j.descriptionPlain, ...(j.lists || []).map((l) => l.text + " " + l.content), j.additionalPlain].join(" ")) };
     }),
     applyUrl: (org, id) => `https://jobs.lever.co/${encodeURIComponent(org)}/${id}/apply`,
     key: (org, id) => `lever:${org}/${id}`.toLowerCase(),
@@ -466,8 +470,9 @@ async function serp(tabId) {
   return (r && r.result) || { captcha: false, links: [] };
 }
 
-// Keka lists the experience that a job needs ("8 - 11 Years"). A job that
-// needs more than your years plus one is not for you.
+// The experience that a job needs: Keka lists it ("8 - 11 Years"), and for
+// the other sites it comes from the job description ("6-12 years of
+// experience"). A job that needs more than your years plus one is not for you.
 const tooSenior = (bj, maxYears) => bj && bj.minYears != null && maxYears != null && bj.minYears > maxYears;
 
 // A skip word does not skip a title when the word is part of a role that you
@@ -498,7 +503,7 @@ async function scanBoard(prov, org, ctx) {
     inPlace = true;
     if (isFull(ctx.cfg)) break;
     if (!bj.listed || !matchesRole(bj.title, ctx.cfg.roles)) continue;
-    if (tooSenior(bj, ctx.maxYears)) { ctx.senior(P.key(org, bj.id)); continue; }
+    if (tooSenior(bj, ctx.maxYears)) { ctx.senior(P.key(org, bj.id), `${org} — ${bj.title}: needs ${bj.minYears}+ years`); continue; }
     const key = P.key(org, bj.id);
     if (hunt.queued.has(key) || ctx.seen[key]) continue;
     if (isExcluded(bj.title, ctx.exclude, ctx.cfg.roles)) {
@@ -550,7 +555,7 @@ async function searchPhase(cfg, seen) {
   const years = Number((await loadProfile()).total_experience_years);
   const ctx = { cfg, seen, exclude, orgCount: (k) => perOrg.get(k) || 0, orgAdd: (k) => perOrg.set(k, (perOrg.get(k) || 0) + 1),
     maxYears: Number.isFinite(years) ? years + 1 : null,
-    senior: (key) => { if (!hunt.queued.has(key)) { hunt.queued.add(key); hunt.found++; hunt.counts.excluded = (hunt.counts.excluded || 0) + 1; } } };
+    senior: (key, why) => { if (!hunt.queued.has(key)) { hunt.queued.add(key); hunt.found++; hunt.counts.excluded = (hunt.counts.excluded || 0) + 1; dbg("skip " + why); } } };
 
   // Step 1: the job lists of the companies already known.
   const { knownOrgs = {}, ashbyOrgs = {} } = await chrome.storage.local.get(["knownOrgs", "ashbyOrgs"]);
@@ -654,6 +659,7 @@ async function searchPhase(cfg, seen) {
         }
         if (tooSenior(bj, ctx.maxYears)) {
           hunt.counts.excluded = (hunt.counts.excluded || 0) + 1;
+          dbg(`skip ${j.org} — ${title}: needs ${bj.minYears}+ years`);
           continue;
         }
         const loc = bj ? boardLocation(bj, cfg.locations) : null;

@@ -93,8 +93,15 @@ Rules:
 - Checkbox questions: answer "true" or "false". Agree to privacy, consent and terms checkboxes only if agree_to_terms is "Yes".
 - Yes/no questions: use the profile facts. Never invent degrees, employers, certifications, skills, or years of experience. If the profile and resume do not support "Yes", answer "No" or "".
 - Work authorization: the candidate can work without sponsorship only in authorized_countries (if that list is empty: in the profile country). The candidate needs visa sponsorship everywhere else. Answer for the country that the question or the job names. If no country is clear, answer "".
-- Short text fields: a short value only, no sentence.
-- Long text fields: 60-120 words, first person, specific to the job and the resume, no clichés.
+- Short text fields that ask for a value (name, number, date, city, link): the value only, no sentence.
+- Open questions ("Why ...", "Describe ...", "Tell us ...", "What ...", "How ..."), in any text field: write as the candidate would speak to a person they respect.
+  - Length: 40-90 words for a large text field, 1-2 sentences for a single-line field. If the question gives a limit, obey it.
+  - Start with the answer. Do not repeat the question. Do not start with "I am excited", "I am passionate", "As an AI Engineer" or "I am most proud of".
+  - Voice: first person, plain words, short sentences, contractions allowed, warm and confident. Show real interest in the company's product or problem: name one specific thing from the job description.
+  - Evidence: give one or two concrete results with their numbers from the resume (for example the percent, the count, the time saved). A number must come from the profile or resume, copied exactly.
+  - Not allowed: buzzwords ("leverage", "passionate", "synergy", "cutting-edge", "robust", "seamless", "dynamic", "fast-paced"), lists of technologies, em dashes, semicolons, bullet points, and a closing sentence that restates the answer.
+- A question about a tool, domain or task that the resume does not show: open with the closest real work from the resume and its result, and say in a few words how it relates to what the question asks. Do not open with the gap, and do not write "I have not" or "I won't pretend". Then add how fast the candidate picks up the missing part (with a real example of learning something new on the job). Do not invent an employer, project, title, tool use, number or duration that the resume does not show.
+- Links: give a link only in a field that asks for that kind of link. LinkedIn for LinkedIn, GitHub for GitHub or code samples. A portfolio, website, blog or "other link" field gets the profile website only. If the website is empty, answer "". Never put the GitHub or LinkedIn link in such a field.
 - Questions about experience, projects or achievements: lead with experience_focus from the profile when it has one, then add other resume items that fit the job. Use only facts from the profile and resume.
 - Demographics (gender, pronouns, ethnicity, hispanic_or_latino, veteran_status, disability, transgender, sexual_orientation): use the profile value. If the profile value is empty, choose the "prefer not to say" or "decline" option.
 - Willingness, availability and commitment questions (travel, team meet-ups, on-call, shifts, hours): use flexible_availability. Office and on-site questions: use comfortable_onsite. If that value is empty, answer "".
@@ -183,6 +190,16 @@ PM_RULES = """This job is a product management role (Product Manager, APM, Produ
 - "Why product management?": connect the candidate's product ownership in the current job with the wish to do it full-time."""
 
 
+OPEN_Q = re.compile(r"^\s*(why|describe|tell (us|me)|explain|walk (us|me)|what (excites?|interests?|motivates?|makes? you|would you|draws?|attracts?)|how (do|did|would|are|have) you (?!hear|find|learn|come|get to know)|in (a few|one|two) (sentences?|lines))\b|\b(briefly|in detail|an example|a time (when|you)|proud of|achievements?|accomplishments?|challenges?|aspirations?|what would you want|most (complex|difficult|interesting)|favou?rite|relevant exp)\b", re.I)
+
+
+def is_long(q):
+    """A written answer: the writer model does it, and it is not saved for other jobs."""
+    if q.get("type") in LONG_TYPES:
+        return True
+    return q.get("type") == "text" and not q.get("options") and bool(OPEN_Q.search(q.get("label", "")))
+
+
 def answer_questions(questions, job, profile, instructions, resume_file="resume.pdf", track="sde"):
     if track == "pm":
         instructions = (PM_RULES + "\n" + (instructions or "")).strip()
@@ -196,8 +213,8 @@ def answer_questions(questions, job, profile, instructions, resume_file="resume.
         else:
             todo.append(q)
 
-    short = [q for q in todo if q.get("type") not in LONG_TYPES]
-    long_ = [q for q in todo if q.get("type") in LONG_TYPES]
+    short = [q for q in todo if not is_long(q)]
+    long_ = [q for q in todo if is_long(q)]
     resume = resume_text(resume_file)
     batches = [(FAST_MODEL, short), (WRITER_MODEL, long_)]
     new_cache = {}
@@ -209,7 +226,7 @@ def answer_questions(questions, job, profile, instructions, resume_file="resume.
                 val = snap_to_option(str(got.get(q["id"], "")), q.get("options"))
                 answers[q["id"]] = val
                 # Long answers are job-specific, so only short ones go in the cache.
-                if val != "" and q.get("type") not in LONG_TYPES:
+                if val != "" and not is_long(q):
                     new_cache[pre + cache_key(q)] = val
     if new_cache:
         write_cache(new_cache)

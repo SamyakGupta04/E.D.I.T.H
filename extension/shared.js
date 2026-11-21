@@ -171,5 +171,32 @@
       cover_letter_template: p.pm_cover_letter_template || p.cover_letter_template };
   }
 
-  globalThis.EdithShared = { toProfile, toList, missingRequired, places, namedCountry, judgeLocation, countryWords, isUS, hasAny, jobTrack, trackProfile };
+  // The years of experience that a job description asks for: "6-12 years of
+  // experience" -> 6, "5+ years" -> 5. With several numbers, the largest
+  // lower limit counts. null: the text gives no number.
+  const NUM_WORD = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15 };
+  function plainText(html) {
+    let s = String(html || "");
+    for (let i = 0; i < 2; i++) s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&rsquo;/g, "'").replace(/&nbsp;/g, " ").replace(/&ndash;|&mdash;/g, "-").replace(/&amp;/g, "&");
+    return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function yearsNeeded(text) {
+    const t = plainText(text).replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen)\b(?=\s*(\+|plus|or more|-|–|to\b)?\s*(\d{1,2}\s*)?\+?\s*(years?|yrs?)\b)/gi, (w) => String(NUM_WORD[w.toLowerCase()]));
+    const re = /(\d{1,2})(?:\.\d)?\s*\+?\s*(?:(?:-|–|—|to)\s*\d{1,2}\s*\+?\s*)?(?:plus\s*|or more\s*)?(?:years?|yrs?)\b/gi;
+    let best = null, m;
+    while ((m = re.exec(t))) {
+      const n = Number(m[1]);
+      if (n > 25) continue;
+      const before = t.slice(Math.max(0, m.index - 50), m.index);
+      const after = t.slice(m.index + m[0].length, m.index + m[0].length + 90);
+      if (/\b(up to|upto|less than|under|below|maximum of|max\.?|within|last|past|next|every|for over|more than \d+ million)\s*$/i.test(before)) continue;
+      if (/^\s*(old|ago|in business|of history|warranty)\b/i.test(after)) continue;
+      const near = before.slice(-35) + " " + after;
+      if (!/experience|\bexp\b|background|track record|hands[- ]on|working (in|with|on|as)|\b(as|in) an? \w+ (engineer|developer|manager|scientist|analyst)|\bof (software|professional|industry|relevant|work|product|engineering|development|building|programming|coding)/i.test(near)) continue;
+      best = Math.max(best == null ? 0 : best, n);
+    }
+    return best;
+  }
+
+  globalThis.EdithShared = { toProfile, toList, missingRequired, places, namedCountry, judgeLocation, countryWords, isUS, hasAny, jobTrack, trackProfile, yearsNeeded, plainText };
 })();

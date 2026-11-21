@@ -170,4 +170,23 @@ test("a US candidate", () => {
   assert.strictEqual(S.judgeLocation("Remote - US", ["United States"], "", us).state, "ok");
 });
 
+test("experience that a job description asks for", () => {
+  assert.strictEqual(S.yearsNeeded("6-12 years of experience in backend systems"), 6);
+  assert.strictEqual(S.yearsNeeded("2+ years of experience with Python and 8+ years of software development"), 8);
+  assert.strictEqual(S.yearsNeeded("&lt;li&gt;At least three years of experience&lt;/li&gt;"), 3);
+  assert.strictEqual(S.yearsNeeded("0-2 years of experience"), 0);
+  assert.strictEqual(S.yearsNeeded("Founded 10 years ago. Up to 2 years of experience."), null);
+});
+test("portfolio field: your website or nothing, never GitHub", () => {
+  const site = profile.website;
+  profile.website = "";
+  assert.strictEqual(ans("Portfolio", "text").v, null);
+  assert.strictEqual(ans("Website", "text").v, null);
+  assert.strictEqual(ans("Other URL", "text").v, null);
+  assert.strictEqual(ans("GitHub or portfolio link", "text").v, undefined);
+  profile.website = "https://jane.example";
+  assert.deepStrictEqual(ans("Portfolio / website", "text").v, ["https://jane.example"]);
+  profile.website = site;
+});
+
 console.log(`${passed} tests passed${process.exitCode ? ", some failed" : ""}`);

@@ -752,6 +752,10 @@
     [/date of birth|\bdob\b|birth ?date|birthday/i, (p) => (known(p.date_of_birth) ? [String(p.date_of_birth).split("-").reverse().join("/")] : null)],
     // "Do you need a work visa?": No for a job in a country where you can work, Yes for the rest.
     [/(need|require) (a |an )?(work |employment )?visa\b/i, (p, l) => elig(l, false), true],
+    // A portfolio or website field gets only your website. With no website it
+    // stays empty: the GitHub link is for fields that ask for GitHub.
+    [/portfolio|website|personal\s*(url|site|page)|\bblog\b|other\s*(url|link|website)s?\b|^(url|link)s?\*?$/i,
+      (p, l, it) => (!it || it.kind !== "text" || /github|linked\s*-?\s*in|how did you|hear about/i.test(l) ? undefined : known(p.website) && !/github\.com|linkedin\.com/i.test(p.website) ? [p.website] : null)],
     // A CAPTCHA is for you. Nothing writes into it.
     [/captcha/i, () => null],
     // Keka: "Experience" is the number of years.
